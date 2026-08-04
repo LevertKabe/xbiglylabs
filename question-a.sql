@@ -1,3 +1,6 @@
+-- Question A: per customer + calendar month, total transactions/spend/rewards.
+-- Need to keep customers who transacted but never got a reward, so no reward
+-- rows for them should NOT drop those transactions from the result.
 
 WITH reward_agg AS (
     SELECT
@@ -8,9 +11,11 @@ WITH reward_agg AS (
 )
 SELECT
     t.customer_id,
+    -- truncates the timestamp down to the 1st of the month, cheaper than FORMAT() on a big fact table
     DATEADD(MONTH, DATEDIFF(MONTH, 0, t.transaction_timestamp), 0) AS month,
     COUNT(*)                            AS total_transactions,
     SUM(t.transaction_amount)           AS total_spend,
+    -- LEFT JOIN + COALESCE so a transaction with no reward shows up as 0, not missing
     COALESCE(SUM(r.reward_amount), 0)   AS total_rewards
 FROM dbo.TRANSACTIONS t
 LEFT JOIN reward_agg r
