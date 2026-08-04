@@ -1,0 +1,22 @@
+Question B: if today's pipeline runs twice by accident, how do I make sure
+the target table stays correct?
+
+two things are doing the work here, not one.
+
+first, the job only looks at new files. Auto Loader keeps a checkpoint of
+which files it's already read, so if someone accidentally kicks the job
+off a second time, there's nothing new for it to pick up, it just finds
+zero new files and does nothing. so most of the time, an accidental
+re-run is a non-event.
+
+but that alone isn't enough, because someone could still manually re-run
+a specific file or backfill something and bypass that checkpoint. that's
+where the second part matters: the actual write to the table is a MERGE,
+keyed on transaction_id, not a plain insert. so even if the same batch of
+rows gets processed twice, the second time around every row already
+matches something in the table, so it just updates them with the same
+values again. nothing gets duplicated.
+
+so basically: the checkpoint stops most accidental re-runs before they
+even do anything, and the MERGE is the backstop that keeps the table
+correct even if a re-run does slip through.
