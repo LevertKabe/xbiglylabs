@@ -1,0 +1,48 @@
+Question B: what business logic belongs in Bronze, Silver, and Gold, and
+what would I deliberately keep out of each?
+
+rule of thumb: facts move left, interpretation moves right. whether a
+record is valid or a duplicate is a fact about the record. whether a
+customer counts as "valuable" or "active" is someone's interpretation of
+that fact for a specific question, and interpretation belongs in Gold,
+not baked into a shared layer everyone else has to inherit.
+
+BRONZE
+belongs: nothing business-related, just ingestion metadata (source
+system, load timestamp, batch id).
+
+keep out: filtering, dedup, joins, validation rules, identity resolution.
+the moment you fix something in Bronze you've lost the ability to replay
+it, and you've coupled raw ingestion to a business rule that will change
+later. when it changes you want to reprocess, not re-pull from six
+source systems.
+
+SILVER
+belongs: real types, dedup on a business key, identity resolution against
+conformed dimensions (an S/4HANA customer, a CRM contact, and a loyalty
+member resolving to one customer_id is a fact about the data model, not
+a business opinion), referential integrity, SCD handling, quarantining
+bad rows.
+
+keep out: anything that encodes one team's definition of something, like
+customer lifetime value or "active customer = purchased in 90 days."
+different stakeholders define these differently, so baking one version
+into shared Silver silently locks everyone downstream into whoever got
+there first. same with one-off filters like "drop test stores" for
+Finance, that's a Gold-mart filter, not a fact.
+
+GOLD
+belongs: the actual business logic. RFM/CLV, loyalty tier rules,
+redemption rates, currency conversion, mart-specific filtering, feature
+engineering for the DS/AI mart. this is where reporting, loyalty, and
+marketing get to define things differently, on purpose.
+
+keep out: quietly patching Silver's data-quality problems per-mart
+instead of fixing the shared contract, and treating Gold as the first
+line of defense for PII/regulated-data masking. pharmacy and the
+external financial partner data need that enforced as policy from Silver
+onward, not left to whoever builds the mart.
+
+short version: Bronze doesn't get an opinion, Silver gets exactly one
+opinion about what the data is, Gold gets as many opinions as there are
+audiences about what it means.
