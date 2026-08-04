@@ -1,0 +1,95 @@
+Question A: a partner sends 20 million transaction records daily, the data
+has to be ready for loyalty processing by 06:00, and files occasionally
+arrive late, contain duplicates, or show up with schema changes. design
+the pipeline: ingestion, orchestration, schema evolution, dedup, data
+contracts, reprocessing, failure recovery, SLA monitoring, reconciliation,
+CI/CD, alerting.
+
+INGESTION MECHANISM
+partner pushes files to a landing zone (SFTP synced to cloud storage, or
+direct write into a partner-scoped prefix). batch, not streaming, since
+it's a daily drop with a fixed deadline, not something that needs to be
+live. at 20 million rows a day I'd expect (and ask the partner for)
+multiple chunked files rather than one giant file, so a bad file doesn't
+take the whole day down and ingestion can run in parallel.
+
+FILE DETECTION / ORCHESTRATION
+Auto Loader watching the landing path via file notifications, not a
+directory listing poll, so detection is near-instant as files land rather
+than on some fixed cron. but detecting files isn't the same as knowing
+the day's delivery is complete, and with a 06:00 hard deadline I don't
+want to guess. so the partner also drops a manifest/completion file once
+they're done sending for the day, and the pipeline treats that as the
+actual "go" signal for anything downstream of Bronze. orchestrated as a
+Workflow: wait for manifest -> ingest -> validate -> conform -> publish
+-> reconcile -> notify.
+
+SCHEMA EVOLUTION
+Bronze schema is deliberately loose, everything lands as-is with Auto
+Loader's schema evolution turned on (new columns get added automatically,
+anything unexpected gets caught by the rescued-data column instead of
+failing the job). what I won't let happen automatically is a column
+*changing* type or disappearing, that gets flagged for review rather than
+silently applied, since a partner renaming or retyping a field is exactly
+the kind of thing that corrupts a report quietly instead of loudly. real
+schema enforcement happens at Silver against the agreed contract, not at
+Bronze.
+
+DUPLICATE DETECTION
+same pattern as the transaction pipeline from Python & Engineering: dedup
+on the agreed business key (partner's transaction id) at Silver, keep the
+latest by ingestion time if the same key shows up twice. on top of that,
+a lightweight file-level check (hash or the partner's own file
+checksum) so an accidentally resent identical file gets skipped before it
+even reaches the row-level dedup logic.
+
+DATA CONTRACTS
+a written agreement with the partner covering field names/types/
+nullability, the business key, file format, naming convention, the
+manifest/completion signal, and delivery time. contract is enforced at
+Silver, violations get quarantined, not silently coerced or dropped. and
+it's versioned, if the partner needs to change something it's a
+negotiated version bump, not a surprise column one Tuesday morning.
+
+REPROCESSING
+Bronze is raw and immutable, partitioned by ingestion date and tagged
+with which source file each row came from, so reprocessing means
+replaying Bronze through the transform logic again, not going back to the
+partner. writes are idempotent (MERGE on the business key), so both a
+full day's reprocess and a single bad file's reprocess are safe to just
+re-run.
+
+FAILURE RECOVERY
+checkpointed so a failed run picks up from where it stopped instead of
+starting over. transient errors retry with backoff; anything that isn't
+transient escalates to a person instead of retrying forever, because
+"just keep retrying" isn't a strategy when there's a 06:00 wall clock.
+
+SLA MONITORING
+the real SLA is "loyalty-ready data published by 06:00," not "the job
+didn't error." so I'd timestamp every stage, manifest received,
+ingested, validated, published, and alert on a threshold earlier than
+06:00 (say 05:30) if it's not done yet, so there's still time to react
+before someone downstream hits a stale table.
+
+RECONCILIATION
+if the partner's manifest includes expected row counts (or file
+checksums), reconcile that against what actually landed and what made it
+through to Gold, accounting for known dedup and quarantine. this is a
+tracked daily number, not something someone eyeballs in the logs.
+
+CI/CD
+pipeline code, Auto Loader config, transform logic, contract validation
+rules, lives in source control and deploys through dev -> staging -> prod
+(Databricks Asset Bundles or similar), never edited directly in prod.
+transform logic gets unit tested the same way as the cleaning pipeline in
+Python & Engineering, plus a smoke test against sample partner-shaped
+data before anything ships to prod.
+
+ALERTING
+alerts for: SLA at risk, pipeline failure, contract violation (something
+outside what auto schema-evolution is allowed to absorb), reconciliation
+mismatch past tolerance, and a duplicate-rate spike (usually means the
+partner resent a file). SLA-at-risk before 06:00 pages on-call
+immediately, the rest goes to a review queue instead of waking someone up
+for a non-urgent issue.
