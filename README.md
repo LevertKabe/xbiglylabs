@@ -7,16 +7,17 @@ Database Schema
 
 <img width="400" height="159" alt="image" src="https://github.com/user-attachments/assets/2f812899-f460-4b71-ba82-27386daff68d" />
 
-
 Question A
+
+<img width="796" height="208" alt="image" src="https://github.com/user-attachments/assets/f6cd830d-cb5c-4e7d-b219-22d29bca0537" />
+
+
+Question B
 
 
 <img width="587" height="188" alt="image" src="https://github.com/user-attachments/assets/e1f572a8-b80a-4cf9-b31a-4767e91d65b7" />
 
 
-Question B
-
-![Uploading image.png…]()
 
 
 
