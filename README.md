@@ -10,4 +10,14 @@ Database Schema
 
 Question A
 
+
+<img width="587" height="188" alt="image" src="https://github.com/user-attachments/assets/e1f572a8-b80a-4cf9-b31a-4767e91d65b7" />
+
+
+Question B
+
 ![Uploading image.png…]()
+
+
+
+
