@@ -1,0 +1,94 @@
+Question A: customer and transaction data contains PII and is shared
+between internal platforms and an external partner. design the controls
+from ingestion through consumption, connecting technical controls to
+trust and compliance rather than treating governance as a separate
+governance-team responsibility.
+
+my starting position on this: if governance only lives in a policy doc
+or a separate team's dashboard, it's not actually controlling anything,
+it's documenting what happened after the fact. the controls have to be
+in the pipeline itself, enforced by the platform, not by someone
+reviewing a spreadsheet once a quarter. so I'd build this in layers,
+ingestion, storage, processing, consumption, sharing, and put an
+enforcement point at each one instead of one big gate at the end.
+
+INGESTION
+PII gets identified and tagged at the point it lands, not discovered
+later. that means classifying columns (name, account number, transaction
+detail) as part of the Bronze schema itself, using column-level tags in
+Unity Catalog (or whatever catalog layer sits under the lakehouse), so
+"this column is PII" is metadata the platform knows, not something a
+downstream analyst has to remember. anything landing without expected
+classification gets flagged, same idea as the contract violation
+handling in the pipeline design, an unexpected sensitive field showing
+up is a signal, not something that silently flows through.
+
+ACCESS CONTROL
+access is role and purpose based, enforced by the catalog, not by
+"please don't query that table." row and column level security so a
+support analyst can see enough to do their job without seeing full card
+numbers, and a data scientist training a model gets aggregated or masked
+data by default, full PII access is the exception that requires
+justification, not the default. service principals for pipelines,
+individual identities for people, so every access is attributable to
+something real, not a shared credential nobody can trace back.
+
+MASKING AND DE-IDENTIFICATION
+raw PII doesn't flow past where it's actually needed. dynamic views or
+column masking functions applied at the catalog layer so the same
+physical table serves a masked version to most consumers and the raw
+version only to roles that are explicitly cleared, tokenization for
+things like account numbers where downstream systems need a stable
+identifier but not the real value. this is the difference between "we
+have a policy against misuse" and "misuse isn't possible with the access
+most people actually have."
+
+ENCRYPTION
+encrypted at rest and in transit as a baseline, that part's table
+stakes. on top of that, field-level encryption for the highest
+sensitivity data, so even someone with storage-level access without the
+right key can't read it in the clear. keys managed and rotated outside
+the data platform itself, so a compromise of the lakehouse isn't
+automatically a compromise of the encryption.
+
+EXTERNAL PARTNER SHARING
+this is the part I'd be most careful about, since once data leaves the
+platform I lose most of my controls. so I don't send data out, I share a
+scoped view of it, Delta Sharing or equivalent, a defined subset of
+columns and rows the partner is actually contracted to see, masked or
+tokenized where the partner doesn't need the raw value, and that scope
+is versioned and reviewed the same way a data contract is, changes to
+what's shared go through the same rigor as changes to schema. audit logs
+on the share itself, so "what did the partner actually pull and when"
+is answerable without asking the partner.
+
+AUDIT AND LINEAGE
+every read and write is logged with who, what, and when, at the catalog
+level, not bolted on by each team separately. lineage tracked from
+ingestion through to whatever report or model consumed the data, so if
+there's ever a "how did this PII end up here" question, the answer is a
+lineage graph, not a week of interviews.
+
+RETENTION AND DELETION
+retention rules enforced by the pipeline, not remembered by a person,
+data past its retention window gets purged or archived automatically,
+and if there's a deletion request tied to a specific customer, that has
+to be something the pipeline can actually execute against the business
+key, across every table it landed in, not just the one obvious table.
+
+MONITORING
+same alerting philosophy as the pipeline design, unusual access patterns
+(a service account suddenly pulling a full table instead of its normal
+scoped query, a spike in raw-PII reads) get flagged the same way a
+duplicate-rate spike or SLA miss would, this is a signal worth paging
+someone on, not a monthly report someone skims.
+
+why this connects to trust and compliance directly: an auditor or a
+partner doesn't trust a policy document, they trust that the system
+enforces what the policy says. if access control, masking, and
+encryption are built into the catalog and the pipeline, then compliance
+isn't a separate checklist someone runs before a review, it's just how
+the data moves, which is the only version of this that actually holds up
+when someone's credentials get phished or a new engineer ships a query
+that shouldn't work, the platform stops it either way, whether or not
+anyone from governance is watching that day.

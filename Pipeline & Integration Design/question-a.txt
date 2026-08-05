@@ -13,7 +13,7 @@ live. at 20 million rows a day I'd expect (and ask the partner for)
 multiple chunked files rather than one giant file, so a bad file doesn't
 take the whole day down and ingestion can run in parallel.
 
-FILE DETECTION / ORCHESTRATION
+FILE DETECTION AND ORCHESTRATION
 Auto Loader watching the landing path via file notifications, not a
 directory listing poll, so detection is near-instant as files land rather
 than on some fixed cron. but detecting files isn't the same as knowing
@@ -78,7 +78,7 @@ checksums), reconcile that against what actually landed and what made it
 through to Gold, accounting for known dedup and quarantine. this is a
 tracked daily number, not something someone eyeballs in the logs.
 
-CI/CD
+CI OR CD
 pipeline code, Auto Loader config, transform logic, contract validation
 rules, lives in source control and deploys through dev -> staging -> prod
 (Databricks Asset Bundles or similar), never edited directly in prod.

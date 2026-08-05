@@ -1,0 +1,63 @@
+Question B: at 05:30 the pipeline fails halfway through processing, how do
+I address technical recovery and communicate with stakeholders.
+
+TECHNICAL RECOVERY
+first thing I want to know is where it died, not just "job failed" but
+which stage, ingestion, validation, transform, or publish, because that
+changes what's actually broken and whether the failure took Gold with it
+or stopped before that. this is basically the 05:30 SLA-at-risk alert
+from question A firing, so the on-call page already tells me roughly
+where things stand, since I'm timestamping every stage.
+
+if it's a transient failure, cluster got preempted, a connection blip, a
+source file locked mid-write, I let the retry-with-backoff do its job
+first and just watch it, since checkpointing means it resumes from the
+last committed stage instead of reprocessing the whole 20 million rows
+from Bronze. I'm not going to manually intervene on something the
+pipeline is already designed to self-heal in the two or three minutes
+that costs me.
+
+if it's not transient, bad data tripped contract validation, a partner
+file half-written, an actual code or config issue, I pull it out of the
+auto-retry loop right away, because retrying a deterministic failure
+just burns the clock until 06:00 for nothing. at that point it's:
+quarantine the offending file or partition so it doesn't block the rest
+of the batch, and reprocess everything else that's clean. Bronze is
+immutable and writes are idempotent MERGE, so re-running the clean
+partitions is safe and doesn't risk double-counting.
+
+then the real question is time, can the clean subset still make 06:00.
+if yes, I keep pushing and treat the bad file as a same-day follow-up
+outside the critical path. if no, I make that call by around 05:40, not
+at 05:58, because stakeholders need runway to decide whether to run
+loyalty processing on a partial dataset, delay it, or fall back to
+yesterday's published table, and none of those decisions should be made
+in the last two minutes.
+
+STAKEHOLDER COMMUNICATION
+I don't wait for a resolution before saying anything. the first message
+goes out the moment SLA-at-risk fires, before I even know root cause:
+"06:00 load is delayed, currently investigating, status update by
+05:40." that goes to on-call plus whoever owns loyalty processing
+downstream, over slack or paging, not email, this needs to land
+somewhere someone's actually watching at 5am.
+
+the second update is the real one, once I know scope: what broke, what's
+affected (all of it vs one partner file), whether 06:00 is still
+hittable, and what the fallback is if not. I give a number, not a vibe,
+"publishing by 06:15, high confidence" is more useful to a downstream
+team deciding whether to hold their job than "working on it."
+
+if we do miss the SLA, I say so as soon as I know, I don't let
+downstream find out because their job errored on a stale table. and I
+give them the decision, not just the problem, run on yesterday's data,
+wait for the delayed refresh, or skip today, that's their call to make,
+my job is to hand them enough info to make it fast.
+
+once it's actually resolved, I close the loop, what happened, how long
+the real delay was, and whether reconciliation still checks out on the
+reprocessed data, since "it's published" isn't the same as "it's
+correct" after a mid-batch failure. and if this was something we could
+have prevented, contract enforcement letting a malformed file through, a
+checkpoint gap, that becomes a real follow-up item, not just a war-room
+note everyone forgets by lunch.
